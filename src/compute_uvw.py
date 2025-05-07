@@ -13,7 +13,7 @@ def meerkat_uvw(unix, direction, antpos):
 
     phase_center = coordinates.SkyCoord(*direction, unit='rad', frame='icrs')
 
-    x0, y0, z0 = [5109360.0, 2006852.5, -3238948.0] # Meerkat array center
+    x0, y0, z0 = [5109360.133,  2006852.586, -3238948.127] # Meerkat array center
 
     antpos = np.array(antpos)
     antpos = coordinates.EarthLocation(x=antpos[:,0], y=antpos[:,1], z=antpos[:,2], unit='m')

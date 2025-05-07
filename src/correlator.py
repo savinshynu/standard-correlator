@@ -73,6 +73,16 @@ class Correlator:
                 # temporary setting for now 
                 #nint = 2    
                 
+                # each dp has 256 time samples, total time = 256*tsamp
+                # This data_offset usually include only the data corresponding to the actual voltages and not the metadata
+                data_offset = int(self.header['OBS_OFFSET']) # how much bytes of data is offset from the very initial observation, from t=0
+                
+                time_offset = int(data_offset/dp) # Ideally this should be an integer, if not, there could be a problem
+                if data_offset % dp != 0:
+                    sys.exit("Check the data offset value. Not a multiple of the basic read structure")
+
+                time_offset *= (self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)  # in seconds. Is there a better way to do this?
+
                 ant_names_str = list(self.meta['antenna_positions'].keys()) # antenna names in the string format
                 
                 ant_names  = [int(ant[1:]) for ant in ant_names_str]   # antenna numbers without "m" in front
@@ -80,7 +90,7 @@ class Correlator:
                 ant1_array = np.zeros((nint, nbls), dtype = 'int32') # array for storing the baseline information 
                 ant2_array = np.zeros((nint, nbls), dtype = 'int32')
         
-                time_array = float(self.header['UTC_START']) + int_dur/2.0 + (np.arange(nint)*int_dur) # time array in unix time stamps (s), selecting points in the middle of integrations
+                time_array = float(self.header['UTC_START']) + time_offset + int_dur/2.0 + (np.arange(nint)*int_dur) # time array in unix time stamps (s), selecting points in the middle of integrations
                 
                 uvw_array = np.zeros((nint, nbls, 3), dtype = 'float32') #initialize the uvw array
 
@@ -253,15 +263,15 @@ class Correlator:
 
     def get_header_data(self):
 
-        lat_mkat = -30.700184259 # latitude degrees 
-        lon_mkat =  21.433509259 # longitude degrees
-        alt_mkat = 1086.6  # altitude in meters
+        lat_mkat = -30.711055553291935 # latitude degrees # obtained from Meerkat visibilities
+        lon_mkat =  21.443888889697842 # longitude degrees
+        alt_mkat = 1086.599484886974  # altitude in meters
         tel_name = self.header['TELESCOPE'] # telescope name
         instrument = self.header['INSTRUMENT'] # instrument name
         history = "Ask savin"
         nants_data = self.header['NANT'] # antennas present in the data
         nants_tel = 64 # antennas present in the telescope
-        nbls = int(nants_data*(nants_data+1)/2.0) # number of baselines
+        nbls = int(nants_data*(nants_data+1)/2.0) # number of baselines, included autocorrelations as well
         ntimes = self.meta['nTimesteps'] # time samples
         nbltimes = nbls*ntimes # baseline * ntimes
         nfreqs = self.header['NCHAN'] # No. of frequency channels
@@ -271,11 +281,6 @@ class Correlator:
         ## collecting important data
         vis_data, uvw_array, ant1_array, ant2_array, flag_data, nsamples_data = self.data 
 
-        # antenna numbers corresponding to each baseline-time pair
-        #ant_names = np.array([b'ea01', b'ea02', b'ea03', b'ea04', b'ea05', b'ea06', b'ea07', b'ea08', b'ea09', b'ea10', b'ea11', b'ea12', b'ea13', b'ea14', b'ea15',
-        # b'ea16', b'ea17', b'ea18', b'ea19', b'ea20', b'ea21', b'ea22', b'ea23', b'ea24', b'ea25', b'ea26', b'ea27', b'ea28'], dtype = 'object')
-        #ant_numbers = np.arange(1,29, dtype = 'int32') # antenna numbers without  ea present in the telescope
-        
         ant_names = [name.encode() for name in self.meta['ant_names_str']]
         ant_numbers = self.meta['ant_index']
 
@@ -327,7 +332,7 @@ class Correlator:
             ref_ecef = ant_pos[ref_ant]
         else:
             # Use the the coordinates of the center of the array
-            ref_ecef = (5109360.0, 2006852.5, -3238948.0)
+            ref_ecef = (5109360.133,  2006852.586, -3238948.127)
         
         ant_pos_ecef = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m)
         return (ant_pos_ecef - np.array(ref_ecef)) # Antenna positions in XYZ wrt to reference antenna or center of the array
@@ -345,7 +350,7 @@ class Correlator:
         fob.close() # close afer after writing
 
         if msdata: # if needed to convert the UVH5 data into the CASA MS format
-            print("Writing out the MF format file")
+            print("Writing out the CASA MS format file")
             uvd = UVData()
             uvd.read(filepath_uvh5, fix_old_proj=False)
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".ms")
@@ -357,7 +362,7 @@ def main(args):
     print(fob.header)
     
     #vis_mat, uvw_array, ant1_array, ant2_array, flag_mat, nsamples_mat = fob.data
-    fob.write_uvh5(outpath="full", msdata=True)
+    fob.write_uvh5(outpath="updated", msdata=True)
     
     
 
