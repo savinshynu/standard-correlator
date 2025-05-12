@@ -21,7 +21,7 @@ def meerkat_uvw(unix, direction, antpos):
     datetime = time.Time(unix, format='unix')
     #print(datetime)
 
-    # VLA array center location
+    # Meerkat array center location
     tel = coordinates.EarthLocation(x=x0, y=y0, z=z0, unit='m')
 
     tel_p, tel_v = tel.get_gcrs_posvel(datetime)
