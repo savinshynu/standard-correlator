@@ -12,6 +12,8 @@ Dependencies required:
 - h5py
 - pyuvdata
 - katpoint
+- numpy
+- tqdm
 
 Usage: ```python correlator.py [DADA file] [meta file] -o [output filepath] -ms (CASA MS if needed)```
 Make sure to input the right input file by matching the date on the meta file and DADA file.
