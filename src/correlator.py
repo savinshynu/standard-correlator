@@ -3,11 +3,8 @@ import sys
 import argparse
 import h5py
 import numpy as np
-import matplotlib
 from katpoint import Antenna # Meerkat library for reading metafile
 from tqdm import tqdm
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
 from astropy import time
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -337,7 +334,7 @@ class Correlator:
         ant_pos_ecef = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m)
         return (ant_pos_ecef - np.array(ref_ecef)) # Antenna positions in XYZ wrt to reference antenna or center of the array
 
-    def write_uvh5(self, outpath = '.', msdata=False):
+    def write_uvh5(self, outpath, msdata):
         """
         Write the header and data into a uvh5 file
         """
@@ -361,8 +358,7 @@ def main(args):
     fob = Correlator(args.DADAfile, args.METAfile)
     print(fob.header)
     
-    #vis_mat, uvw_array, ant1_array, ant2_array, flag_mat, nsamples_mat = fob.data
-    fob.write_uvh5(outpath="updated", msdata=True)
+    fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms)
     
     
 
@@ -370,10 +366,13 @@ def main(args):
 if __name__ == '__main__':
 
     # Argument parser
-    parser = argparse.ArgumentParser(description="For reading and visualizing DADA files", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description="Read DADA files, crosscorrelate and write out the visibilities in the UVH5/CASA MS formats.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('DADAfile')
-    parser.add_argument('METAfile')
+    parser.add_argument('DADAfile', type=str, help="Input voltage data file in the .dada format")
+    parser.add_argument('METAfile', type=str, help="Input metafile for the observations in the .hdf5 format")
+    parser.add_argument('-o', '--outdir', type=str, required=False, default='.', help='Filepath of the output directory for storing visibilities')
+    parser.add_argument('-ms', '--casa_ms', action='store_true', help="Outputs the visibilities in the CASA MS format in addition to UVH5 format")
+
     args = parser.parse_args()
     
     # run the main function
