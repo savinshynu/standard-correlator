@@ -36,7 +36,7 @@ class Correlator:
         self.header = self.parse_header(header)
 
 
-    def load_all_data(self, int_dur=0.02):
+    def load_all_data(self, int_dur=0.1):
 
         """
         Here we collect the time series data from all antennas and do the cross correlations of all antennas
@@ -132,7 +132,7 @@ class Correlator:
                     # converting that to a complex format
                     chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
                     #print(chunk.shape)
-                    t1 = tm.time()
+                    #t1 = tm.time()
                     # calculate averaged visibilities 
                     vis_int, uvw_int, ant1_int, ant2_int = self.calc_vis_uvw_ant(chunk, uvw_now, ant_names)
                     
@@ -140,12 +140,11 @@ class Correlator:
                     uvw_array[num, :, :] = uvw_int
                     ant1_array[num, :] = ant1_int
                     ant2_array[num, :] = ant2_int
-                    t2 = tm.time()
+                    t1 = tm.time()
                     
-                    print(f"Integration:{num}")
-                    print(f"Loading time:{(t1-t0):0.3f}")
-                    print(f"Correlation time: {(t2-t1):0.3f}")
-                    num +=1 
+                    #print(f"Integration:{num}")
+                    print(f"Loading and correlation time:{(t1-t0):0.3f}")
+                    
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
                             ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, npol), nsamples_mat.reshape(nint*nbls, nchan, npol))
