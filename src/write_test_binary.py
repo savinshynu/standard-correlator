@@ -10,7 +10,7 @@ class WriteSampleBinary:
     def __init__(self, infile, nchunks, outfile="."):
         self.file_path = infile
         self.outfile_path = outfile
-        self.nchunks = nchunks
+        self.nchunks = nchunks # no. of integrations to write
         self.data = None
         self.load_header() # loading header from the DADA file
 
@@ -68,12 +68,12 @@ class WriteSampleBinary:
                 npol = self.header['NPOL']
                 ndim = self.header['NDIM']
                 inner_t = self.header['INNER_T']
-                outer_t = int(int_dur/(self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)) # Number of outer time steps to read at a time
+                outer_t = int(int_dur/(self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)) # Number of outer time steps to read at a time for an integration time
 
                 nint = int(raw_size/(dp*outer_t)) # number of integrated time samples
 
                 if self.nchunks < nint:
-                    data = np.fromfile(f, dtype=np.int8, count=(self.header['HDR_SIZE']+dp*self.nchunks)) #reading a portion of required data into the memory
+                    data = np.fromfile(f, dtype=np.int8, count=(self.header['HDR_SIZE']+dp*outer_t*self.nchunks)) #reading a portion of required data into the memory
                     
                     with open(self.outfile_path+"/test.dada", "wb") as fw:
                         fw.write(data)
