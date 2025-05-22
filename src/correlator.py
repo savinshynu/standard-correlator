@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import h5py
+import time as tm
 import numpy as np
 from katpoint import Antenna # Meerkat library for reading metafile
 from tqdm import tqdm
@@ -35,14 +36,14 @@ class Correlator:
         self.header = self.parse_header(header)
 
 
-    def load_all_data(self, int_dur=0.1):
+    def load_all_data(self, int_dur=0.02):
 
         """
         Here we collect the time series data from all antennas and do the cross correlations of all antennas
         and save the corresponding visibility matrix, other data  and metadata needed for MS format.
         """
-        
-        raw_size = int(self.header['FILE_SIZE']) - int(self.header['HDR_SIZE'])
+        filesize = int(os.path.getsize(self.file_path))
+        raw_size = filesize - int(self.header['HDR_SIZE'])
         #free_memory = psutil.virtual_memory()[4]/5
 
         if self.header['ORDER'] == 'TAFTP': #if this is not present is this a norm?
@@ -111,6 +112,7 @@ class Correlator:
                 
                 print("Reading chunks of data from the DADA files and cross correlating to get the visibility matrix")
                 for num in tqdm(range(nint)):
+                    t0 = tm.time()
                     chunk = np.fromfile(f, dtype=np.int8, count=dp*outer_t) #reading a portion of data into the memory
 
                     # get the UVW value at this time for all the antennas
@@ -130,7 +132,7 @@ class Correlator:
                     # converting that to a complex format
                     chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
                     #print(chunk.shape)
-
+                    t1 = tm.time()
                     # calculate averaged visibilities 
                     vis_int, uvw_int, ant1_int, ant2_int = self.calc_vis_uvw_ant(chunk, uvw_now, ant_names)
                     
@@ -138,7 +140,11 @@ class Correlator:
                     uvw_array[num, :, :] = uvw_int
                     ant1_array[num, :] = ant1_int
                     ant2_array[num, :] = ant2_int
-
+                    t2 = tm.time()
+                    
+                    print(f"Integration:{num}")
+                    print(f"Loading time:{(t1-t0):0.3f}")
+                    print(f"Correlation time: {(t2-t1):0.3f}")
                     num +=1 
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
