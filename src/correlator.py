@@ -1,7 +1,10 @@
 import os
 import sys
 import argparse
+import multiprocessing as mp
+
 import h5py
+import psutil
 import numpy as np
 from katpoint import Antenna # Meerkat library for reading metafile
 from tqdm import tqdm
@@ -35,20 +38,20 @@ class Correlator:
         self.header = self.parse_header(header)
 
 
-    def load_all_data(self, int_dur=0.1):
+    def load_all_data(self, int_dur=0.02): #usually set to 0.1
 
         """
         Here we collect the time series data from all antennas and do the cross correlations of all antennas
         and save the corresponding visibility matrix, other data  and metadata needed for MS format.
         """
-        
-        raw_size = int(self.header['FILE_SIZE']) - int(self.header['HDR_SIZE'])
+        file_size = int(os.path.getsize(self.file_path)) # sometimes the file size can be lesser than the one in header due to incorrect copying
+        raw_size = file_size - int(self.header['HDR_SIZE'])
         #free_memory = psutil.virtual_memory()[4]/5
 
         if self.header['ORDER'] == 'TAFTP': #if this is not present is this a norm?
             # Read data
-            with open(self.file_path, 'rb') as f:
-                f.seek(self.header['HDR_SIZE'])
+            with open(self.file_path, 'rb') as self.fh:
+                self.fh.seek(self.header['HDR_SIZE'])
                 
                 dp =  self.header['NANT']*self.header['NCHAN']*self.header['INNER_T']*self.header['NPOL']*self.header['NDIM'] # Minimum samples needed for reordering
 
@@ -80,7 +83,7 @@ class Correlator:
 
                 time_offset *= (self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)  # in seconds. Is there a better way to do this?
 
-                ant_names_str = list(self.meta['antenna_positions'].keys()) # antenna names in the string format
+                ant_names_str = list(self.meta['antenna_pos_dict'].keys()) # antenna names in the string format
                 
                 ant_names  = [int(ant[1:]) for ant in ant_names_str]   # antenna numbers without "m" in front
 
@@ -91,7 +94,7 @@ class Correlator:
                 
                 uvw_array = np.zeros((nint, nbls, 3), dtype = 'float32') #initialize the uvw array
 
-                antpos = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m), corresponding changes made while computing UVW. 
+                #antpos = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m), corresponding changes made while computing UVW. 
         
                 # The pointing information in ra, dec strings to radians
                 pointing = self.convert_dir2float(self.header['RA'], self.header['DEC'])
@@ -103,43 +106,42 @@ class Correlator:
                 self.meta['time_array'] = time_array
                 self.meta['pointing'] = pointing
                 self.meta['tInt'] = int_dur
+                self.meta['data_par'] = (dp, outer_t, nant, nchan, inner_t, npol, ndim) # adding the basic data dimension parameters
                 
                 # Defining array to store the visibilities, flag and sample ration per integration
                 vis_mat = np.zeros((nint, nbls, nchan, npol), dtype='complex64')
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
-                
-                print("Reading chunks of data from the DADA files and cross correlating to get the visibility matrix")
-                for num in tqdm(range(nint)):
-                    chunk = np.fromfile(f, dtype=np.int8, count=dp*outer_t) #reading a portion of data into the memory
 
-                    # get the UVW value at this time for all the antennas
-                    uvw_now = meerkat_uvw(time_array[num], pointing, antpos)
-                     
-                    if chunk.size < dp*outer_t:
-                        samp_ratio = round(chunk.size/(dp*outer_t), 3)
-                        nsamples_mat[num,:, :, :] = samp_ratio
-                    
-                    #first reading based on how data is stored
-                    chunk = np.reshape(chunk, (outer_t, nant, nchan, 
-                            inner_t, npol, ndim)) 
-            
-                    # transposing to array the combine the outer and inner time axis
-                    chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan, outer_t*inner_t, npol, ndim))
+                num_workers = 8 # No. of CPUs to use at a time
 
-                    # converting that to a complex format
-                    chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
-                    #print(chunk.shape)
+                print(self.fh.tell())
 
-                    # calculate averaged visibilities 
-                    vis_int, uvw_int, ant1_int, ant2_int = self.calc_vis_uvw_ant(chunk, uvw_now, ant_names)
-                    
-                    vis_mat[num, :, :, :] = vis_int
-                    uvw_array[num, :, :] = uvw_int
-                    ant1_array[num, :] = ant1_int
-                    ant2_array[num, :] = ant2_int
+                # Couple of important things happens here
+                # we try to invoke the multiprocessin step here where we feed different data offsets, uvw parameter for each time integration and file handler here
+                # Now the self.calc_vis_uvw_ant will run as a seperate process on each core, read that corresponding data chunk using numpy and conducts
+                # the correlation and other uvw coordinate calculation for each baseline
+                # After the each parallel operation step, the results are saved into the corresponding arrays
+                # This is possible because of the pool.imap function which allows streaming inputs and allowing to collect their results in the processing order
+                # we are calling a generator self.read_data_offsets here and we want to feed the outputs to the function that needs to be parallelized.
+                # Interesting thing, you can only pass serializable objects to multiprocessing, so we should avoid open object like class methods and 
+                # file object. But arrays, outuput of generators or static methods are acceptable
 
-                    num +=1 
+                #inp_mult = self.read_data_offsets(nint) # contains uvw of all integrations and data offset for each integration
+
+                with mp.Pool(processes=num_workers) as pool:
+                    # Feed offsets and file handler into pool
+                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_chunks(nint))):
+
+                        # calculate averaged visibilities 
+                        vis_int, uvw_int, ant1_int, ant2_int = output
+                        
+                        vis_mat[num, :, :, :] = vis_int
+                        uvw_array[num, :, :] = uvw_int
+                        ant1_array[num, :] = ant1_int
+                        ant2_array[num, :] = ant2_int
+                        nsamples_mat[num,:, :, :] = 1.0 # tempororily
+
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
                             ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, npol), nsamples_mat.reshape(nint*nbls, nchan, npol))
@@ -148,13 +150,51 @@ class Correlator:
         else:
             sys.exit("Unknown data order for Meerkat")
 
+    def read_data_chunks(self, nint):
+        """
+        Getting the file offset for each integration and also the 
+        the corresponding the uvw cooordinates
+        """
+        dp, outer_t, nant, nchan, inner_t, npol, ndim = self.meta['data_par']
+        #output = []
+        min_samples =  dp * outer_t
+        for num in tqdm(range(nint)):
+            #offset = num*dp*outer_t
+            # get the UVW value at this time for all the antennas
+            uvw_now = meerkat_uvw(self.meta['time_array'][num], self.meta['pointing'], self.meta['antenna_positions'])
+            print(self.fh.tell())
+
+            chunk = np.fromfile(self.fh, dtype=np.int8, count=dp*outer_t) #reading a portion of data into the memory
+
+            ant_names = self.meta['ant_index']
+
+            if chunk.size < dp*outer_t:
+                samp_ratio = round(chunk.size/(dp*outer_t), 3)
+            else:
+                samp_ratio = 1.0
+
+            #first reading based on how data is stored
+            chunk = np.reshape(chunk, (outer_t, nant, nchan, 
+                    inner_t, npol, ndim)) 
+
+            # transposing to array the combine the outer and inner time axis
+            chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan, outer_t*inner_t, npol, ndim))
+
+            # converting that to a complex format
+            chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
+            #print(chunk.shape)
+            #ouput.append(num, uvw_now, chunk, ant_names)
+            yield (uvw_now, chunk, ant_names, min_samples)
+
     @staticmethod
-    def calc_vis_uvw_ant(chunk, uvw_now, ant_names):
+    def calc_vis_uvw_ant(inp_args):
         """
         Calculate the visibility for each chunk read into the memory, UVW coordinates
         and collect baseline information.
         """
-        
+        uvw_now, chunk, ant_names, min_samples = inp_args
+    
+
         nant, nchan, ntimes, _ = chunk.shape
         nprod = 2 # 2 polarization product for now
         nbls = int(nant*(nant+1)/2)
@@ -188,6 +228,10 @@ class Correlator:
                     uvw_chunk[bls_ind,:] = uvw_now[ant1,:] - uvw_now[ant2,:] # difference in uvw coordinates between antenna 1 and 2
 
                     bls_ind += 1
+        
+        # Get memory info for each parallel process
+        process = psutil.Process(os.getpid())
+        mem_used_mb = process.memory_info().rss / (1024 * 1024)
 
         return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk)
     
@@ -254,7 +298,8 @@ class Correlator:
                     ant_pos[ant_ob.name] = ant_ob.position_ecef # assign the corresponding ECEF coordinates in tuples
 
         
-            self.meta["antenna_positions"] = ant_pos
+            self.meta["antenna_pos_dict"] = ant_pos # converting the values inside dict to an array
+            self.meta['antenna_positions'] = np.array(list(ant_pos.values()))
             self.meta["antenna_feng_map"] = antenna_feng_map
             self.meta.update(dict(hf.attrs))
 
@@ -323,15 +368,14 @@ class Correlator:
         Collect the antenna positions wrt to the reference antenna in the ECEF format
         If no reference antenna given, use the array center location
         """
-        ant_pos = self.meta['antenna_positions'] # dictionary containing values
+        ant_pos_ecef = self.meta['antenna_positions'] # dictionary containing values
         
         if ref_ant:
-            ref_ecef = ant_pos[ref_ant]
+            ref_ecef = ant_pos_ecef[ref_ant]
         else:
             # Use the the coordinates of the center of the array
             ref_ecef = (5109360.133,  2006852.586, -3238948.127)
         
-        ant_pos_ecef = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m)
         return (ant_pos_ecef - np.array(ref_ecef)) # Antenna positions in XYZ wrt to reference antenna or center of the array
 
     def write_uvh5(self, outpath, msdata):
@@ -339,7 +383,7 @@ class Correlator:
         Write the header and data into a uvh5 file
         """
         
-        filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".uvh5")
+        filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+"_multi.uvh5")
         print(f"Writing out {filepath_uvh5}")
         fob = h5py.File(filepath_uvh5, "w") # creating the uvh5 file
         head_dict, data_dict = self.get_header_data() # collecting all the important data and header
@@ -351,7 +395,10 @@ class Correlator:
             uvd = UVData()
             uvd.read(filepath_uvh5, fix_old_proj=False)
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".ms")
-            uvd.write_ms(outfile_ms)
+            if not os.path.exists(outfile_ms):
+                uvd.write_ms(outfile_ms)
+            else:
+                print(f"{outfile_ms} already exists")
 
 def main(args):
     
