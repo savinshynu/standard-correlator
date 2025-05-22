@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import argparse
 import multiprocessing as mp
 
@@ -38,7 +39,7 @@ class Correlator:
         self.header = self.parse_header(header)
 
 
-    def load_all_data(self, int_dur=0.02): #usually set to 0.1
+    def load_all_data(self, int_dur=0.1): #usually set to 0.1
 
         """
         Here we collect the time series data from all antennas and do the cross correlations of all antennas
@@ -50,8 +51,8 @@ class Correlator:
 
         if self.header['ORDER'] == 'TAFTP': #if this is not present is this a norm?
             # Read data
-            with open(self.file_path, 'rb') as self.fh:
-                self.fh.seek(self.header['HDR_SIZE'])
+            with open(self.file_path, 'rb') as fh:
+                fh.seek(self.header['HDR_SIZE'])
                 
                 dp =  self.header['NANT']*self.header['NCHAN']*self.header['INNER_T']*self.header['NPOL']*self.header['NDIM'] # Minimum samples needed for reordering
 
@@ -113,9 +114,8 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
-                num_workers = 8 # No. of CPUs to use at a time
+                num_workers = 1 # No. of CPUs to use at a time
 
-                print(self.fh.tell())
 
                 # Couple of important things happens here
                 # we try to invoke the multiprocessin step here where we feed different data offsets, uvw parameter for each time integration and file handler here
@@ -131,16 +131,16 @@ class Correlator:
 
                 with mp.Pool(processes=num_workers) as pool:
                     # Feed offsets and file handler into pool
-                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_chunks(nint))):
+                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets())):
 
                         # calculate averaged visibilities 
-                        vis_int, uvw_int, ant1_int, ant2_int = output
+                        vis_int, uvw_int, ant1_int, ant2_int, samp_ratio = output
                         
                         vis_mat[num, :, :, :] = vis_int
                         uvw_array[num, :, :] = uvw_int
                         ant1_array[num, :] = ant1_int
                         ant2_array[num, :] = ant2_int
-                        nsamples_mat[num,:, :, :] = 1.0 # tempororily
+                        nsamples_mat[num,:, :, :] = samp_ratio
 
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
@@ -150,20 +150,21 @@ class Correlator:
         else:
             sys.exit("Unknown data order for Meerkat")
 
-    def read_data_chunks(self, nint):
+    def read_data_offsets(self):
         """
         Getting the file offset for each integration and also the 
         the corresponding the uvw cooordinates
         """
         dp, outer_t, nant, nchan, inner_t, npol, ndim = self.meta['data_par']
         #output = []
-        min_samples =  dp * outer_t
-        for num in tqdm(range(nint)):
-            #offset = num*dp*outer_t
+        count =  dp * outer_t
+        for num in tqdm(range(self.meta['nTimesteps'])):
+            offset = num*count + self.header['HDR_SIZE']
             # get the UVW value at this time for all the antennas
             uvw_now = meerkat_uvw(self.meta['time_array'][num], self.meta['pointing'], self.meta['antenna_positions'])
-            print(self.fh.tell())
-
+            #print(self.fh.tell())
+            
+            """
             chunk = np.fromfile(self.fh, dtype=np.int8, count=dp*outer_t) #reading a portion of data into the memory
 
             ant_names = self.meta['ant_index']
@@ -184,7 +185,8 @@ class Correlator:
             chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
             #print(chunk.shape)
             #ouput.append(num, uvw_now, chunk, ant_names)
-            yield (uvw_now, chunk, ant_names, min_samples)
+            """
+            yield (uvw_now, self.meta['ant_index'], self.file_path, count, offset, self.meta['data_par'])
 
     @staticmethod
     def calc_vis_uvw_ant(inp_args):
@@ -192,10 +194,29 @@ class Correlator:
         Calculate the visibility for each chunk read into the memory, UVW coordinates
         and collect baseline information.
         """
-        uvw_now, chunk, ant_names, min_samples = inp_args
-    
+        uvw_now, ant_names, filepath, count, offset, par = inp_args
 
-        nant, nchan, ntimes, _ = chunk.shape
+        dp, outer_t, nant, nchan, inner_t, npol, ndim  = par
+
+        with open(filepath, 'rb') as fh:
+            chunk = np.fromfile(fh, dtype=np.int8, count=count, offset=offset) #reading a portion of data into the memory
+
+        if chunk.size < count:
+            samp_ratio = round(chunk.size/(count), 3)
+        else:
+            samp_ratio = 1.0
+
+        #first reading based on how data is stored
+        chunk = np.reshape(chunk, (outer_t, nant, nchan, 
+                inner_t, npol, ndim)) 
+
+        # transposing to array the combine the outer and inner time axis
+        chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan, outer_t*inner_t, npol, ndim))
+
+        # converting that to a complex format
+        chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
+
+        #nant, nchan, ntimes, _ = chunk.shape
         nprod = 2 # 2 polarization product for now
         nbls = int(nant*(nant+1)/2)
         vis_chunk = np.zeros((nbls, nchan, nprod), dtype='complex64')
@@ -232,8 +253,9 @@ class Correlator:
         # Get memory info for each parallel process
         process = psutil.Process(os.getpid())
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
+        print(mem_used_mb)
 
-        return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk)
+        return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk, samp_ratio)
     
     @staticmethod
     def parse_header(header):
