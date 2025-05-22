@@ -74,9 +74,10 @@ class WriteSampleBinary:
 
                 if self.nchunks < nint:
                     data = np.fromfile(f, dtype=np.int8, count=(self.header['HDR_SIZE']+dp*outer_t*self.nchunks)) #reading a portion of required data into the memory
-                    
-                    with open(self.outfile_path+"/test.dada", "wb") as fw:
+                    print("Data acquired")
+                    with open(self.outfile_path+"/test-big.dada", "wb") as fw:
                         fw.write(data)
+                        print("Test file written to")
 
         else:
             sys.exit("Unknown data order for Meerkat")
@@ -84,7 +85,8 @@ class WriteSampleBinary:
                 
 if __name__ == "__main__":
     input_file = sys.argv[1]
-    nchunks = 8
+    outfile_path = sys.argv[2]
+    nchunks = 100
 
-    wob = WriteSampleBinary(input_file, nchunks)
+    wob = WriteSampleBinary(input_file, nchunks, outfile_path)
     wob.write_data()
