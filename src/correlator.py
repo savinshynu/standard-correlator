@@ -1,6 +1,6 @@
 import os
 import sys
-import time
+import time as tm
 import argparse
 import multiprocessing as mp
 
@@ -114,7 +114,8 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
-                num_workers = 1 # No. of CPUs to use at a time
+                num_workers = 4
+                 # No. of CPUs to use at a time
 
 
                 # Couple of important things happens here
@@ -127,8 +128,7 @@ class Correlator:
                 # Interesting thing, you can only pass serializable objects to multiprocessing, so we should avoid open object like class methods and 
                 # file object. But arrays, outuput of generators or static methods are acceptable
 
-                #inp_mult = self.read_data_offsets(nint) # contains uvw of all integrations and data offset for each integration
-
+                tf0 = tm.time()            
                 with mp.Pool(processes=num_workers) as pool:
                     # Feed offsets and file handler into pool
                     for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets())):
@@ -141,6 +141,9 @@ class Correlator:
                         ant1_array[num, :] = ant1_int
                         ant2_array[num, :] = ant2_int
                         nsamples_mat[num,:, :, :] = samp_ratio
+                
+                tf1 = tm.time()
+                print(f"Total time: {(tf1-tf0):0.3f}")
 
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
@@ -158,7 +161,7 @@ class Correlator:
         dp, outer_t, nant, nchan, inner_t, npol, ndim = self.meta['data_par']
         #output = []
         count =  dp * outer_t
-        for num in tqdm(range(self.meta['nTimesteps'])):
+        for num in range(self.meta['nTimesteps']):
             offset = num*count + self.header['HDR_SIZE']
             # get the UVW value at this time for all the antennas
             uvw_now = meerkat_uvw(self.meta['time_array'][num], self.meta['pointing'], self.meta['antenna_positions'])
@@ -194,13 +197,15 @@ class Correlator:
         Calculate the visibility for each chunk read into the memory, UVW coordinates
         and collect baseline information.
         """
+        t0 = tm.time()
+
         uvw_now, ant_names, filepath, count, offset, par = inp_args
 
         dp, outer_t, nant, nchan, inner_t, npol, ndim  = par
 
         with open(filepath, 'rb') as fh:
             chunk = np.fromfile(fh, dtype=np.int8, count=count, offset=offset) #reading a portion of data into the memory
-
+        
         if chunk.size < count:
             samp_ratio = round(chunk.size/(count), 3)
         else:
@@ -215,6 +220,9 @@ class Correlator:
 
         # converting that to a complex format
         chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
+
+        t1 = tm.time()
+        print(f"data collection and transpose: {(t1-t0):0.3f}")
 
         #nant, nchan, ntimes, _ = chunk.shape
         nprod = 2 # 2 polarization product for now
@@ -254,7 +262,8 @@ class Correlator:
         process = psutil.Process(os.getpid())
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
         print(mem_used_mb)
-
+        t2 = tm.time()
+        print(f"correlation time:{(t2-t1):0.3f}")
         return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk, samp_ratio)
     
     @staticmethod
