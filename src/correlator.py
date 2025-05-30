@@ -111,6 +111,7 @@ class Correlator:
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
                 
                 print("Reading chunks of data from the DADA files and cross correlating to get the visibility matrix")
+                tf0 = tm.time()
                 for num in tqdm(range(nint)):
                     t0 = tm.time()
                     chunk = np.fromfile(f, dtype=np.int8, count=dp*outer_t) #reading a portion of data into the memory
@@ -148,7 +149,8 @@ class Correlator:
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
                 self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
                             ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, npol), nsamples_mat.reshape(nint*nbls, nchan, npol))
-
+                tf1 = tm.time()
+                print(f"Total time:{(tf1-tf0):0.3f}")
         
         else:
             sys.exit("Unknown data order for Meerkat")
