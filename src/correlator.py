@@ -1,12 +1,20 @@
 import os
 import sys
+import gc
 import time as tm
 import argparse
+import cProfile
 import multiprocessing as mp
+
+#os.environ["OMP_NUM_THREADS"] = "1"
+#os.environ["MKL_NUM_THREADS"] = "1"
+#os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 
 import h5py
 import psutil
 import numpy as np
+from numba import njit
 from katpoint import Antenna # Meerkat library for reading metafile
 from tqdm import tqdm
 from astropy import time
@@ -16,7 +24,6 @@ from pyuvdata import UVData
 
 from compute_uvw import meerkat_uvw
 from uvh5_tools import create_uvh5
-
 
 
 class Correlator:
@@ -114,7 +121,7 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
-                num_workers = 4
+                num_workers = 1
                  # No. of CPUs to use at a time
 
 
@@ -128,10 +135,16 @@ class Correlator:
                 # Interesting thing, you can only pass serializable objects to multiprocessing, so we should avoid open object like class methods and 
                 # file object. But arrays, outuput of generators or static methods are acceptable
 
-                tf0 = tm.time()            
+                tf0 = tm.time()
+                # Get a list of the available CPU cores 
+                cpu_ids = tuple(os.sched_getaffinity(os.getpid()))
+                print(cpu_ids)
+
                 with mp.Pool(processes=num_workers) as pool:
                     # Feed offsets and file handler into pool
-                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets())):
+                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets(cpu_ids))):
+                    #for num, output in enumerate(pool.imap(self.profiled_worker, self.read_data_offsets(cpu_ids))):
+
 
                         # calculate averaged visibilities 
                         vis_int, uvw_int, ant1_int, ant2_int, samp_ratio = output
@@ -153,7 +166,7 @@ class Correlator:
         else:
             sys.exit("Unknown data order for Meerkat")
 
-    def read_data_offsets(self):
+    def read_data_offsets(self, cpu_ids):
         """
         Getting the file offset for each integration and also the 
         the corresponding the uvw cooordinates
@@ -161,7 +174,14 @@ class Correlator:
         dp, outer_t, nant, nchan, inner_t, npol, ndim = self.meta['data_par']
         #output = []
         count =  dp * outer_t
+        # Total no: of allocated cores
+        ncpus = len(cpu_ids)
+
         for num in range(self.meta['nTimesteps']):
+
+            ind = num % ncpus # allocate ncpus among number of time steps that are needed to parallelize
+            cpu_id = cpu_ids[ind] # Basically pinning a single cpu_id to each process here.
+
             offset = num*count + self.header['HDR_SIZE']
             # get the UVW value at this time for all the antennas
             uvw_now = meerkat_uvw(self.meta['time_array'][num], self.meta['pointing'], self.meta['antenna_positions'])
@@ -189,7 +209,7 @@ class Correlator:
             #print(chunk.shape)
             #ouput.append(num, uvw_now, chunk, ant_names)
             """
-            yield (uvw_now, self.meta['ant_index'], self.file_path, count, offset, self.meta['data_par'])
+            yield (cpu_id, uvw_now, self.meta['ant_index'], self.file_path, count, offset, self.meta['data_par'])
 
     @staticmethod
     def calc_vis_uvw_ant(inp_args):
@@ -197,9 +217,15 @@ class Correlator:
         Calculate the visibility for each chunk read into the memory, UVW coordinates
         and collect baseline information.
         """
+        pid = os.getpid()
+        process = psutil.Process(pid)
+        #process.cpu_affinity([inp_args[0]]) # assigning the core_id for pinning each process on independent cpu
+        #os.sched_setaffinity(pid, {inp_args[0]})
+        #print(f"Process: {pid} pinned to Core: {inp_args[0]}")
+
         t0 = tm.time()
 
-        uvw_now, ant_names, filepath, count, offset, par = inp_args
+        _, uvw_now, ant_names, filepath, count, offset, par = inp_args
 
         dp, outer_t, nant, nchan, inner_t, npol, ndim  = par
 
@@ -222,7 +248,7 @@ class Correlator:
         chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
 
         t1 = tm.time()
-        print(f"data collection and transpose: {(t1-t0):0.3f}")
+        #print(f"data collection and transpose: {(t1-t0):0.3f}")
 
         #nant, nchan, ntimes, _ = chunk.shape
         nprod = 2 # 2 polarization product for now
@@ -236,9 +262,17 @@ class Correlator:
 
         # Write out the auto correlations first
         for ant in range(nant):
-            vis_chunk[bls_ind, :, 0] = (chunk[ant, :, :, 0] * np.conjugate(chunk[ant, :, :, 0])).mean(axis=1) # RR
-            vis_chunk[bls_ind, :, 1] = (chunk[ant, :, :, 1] * np.conjugate(chunk[ant, :, :, 1])).mean(axis=1) # LL
 
+            #corr_chunk = chunk[ant, :, :, :] * np.conjugate(chunk[ant, :, :, :])
+            #vis_chunk[bls_ind, :, :]  = corr_chunk.mean(axis=1)
+            # XX and YY
+            
+            vis_chunk[bls_ind, :, :] = (chunk[ant, :, :, :] * np.conjugate(chunk[ant, :, :, :])).mean(axis=1)
+            
+            #vis_chunk[bls_ind, :, 0] = (chunk[ant, :, :, 0] * np.conjugate(chunk[ant, :, :, 0])).mean(axis=1) # XX
+            #vis_chunk[bls_ind, :, 1] = (chunk[ant, :, :, 1] * np.conjugate(chunk[ant, :, :, 1])).mean(axis=1) # YY
+
+            
             ant1_chunk[bls_ind] = ant_names[ant] # First antenna
             ant2_chunk[bls_ind] = ant_names[ant] # second antenna
             uvw_chunk[bls_ind,:] = 0.0 # uvw_ant1 - uvw_ant2 == 0 for autocorrelation
@@ -249,8 +283,13 @@ class Correlator:
         for ant1 in range(nant):
             if (ant1 + 1) < nant:
                 for ant2 in range(ant1 +1 , nant):
-                    vis_chunk[bls_ind, :, 0] = (chunk[ant1, :, :, 0] * np.conjugate(chunk[ant2, :, :, 0])).mean(axis=1) # XX
-                    vis_chunk[bls_ind, :, 1] = (chunk[ant1, :, :, 1] * np.conjugate(chunk[ant2, :, :, 1])).mean(axis=1) # YY  
+
+                    #corr_chunk = chunk[ant1, :, :, :] * np.conjugate(chunk[ant2, :, :, :])
+                    #vis_chunk[bls_ind, :, :]  = corr_chunk.mean(axis=1)
+                    # XX and YY
+                    vis_chunk[bls_ind, :, :] = (chunk[ant1, :, :, :] * np.conjugate(chunk[ant2, :, :, :])).mean(axis=1)
+                    #vis_chunk[bls_ind, :, 0] = (chunk[ant1, :, :, 0] * np.conjugate(chunk[ant2, :, :, 0])).mean(axis=1) # XX
+                    #vis_chunk[bls_ind, :, 1] = (chunk[ant1, :, :, 1] * np.conjugate(chunk[ant2, :, :, 1])).mean(axis=1) # YY  
 
                     ant1_chunk[bls_ind] = ant_names[ant1]
                     ant2_chunk[bls_ind] = ant_names[ant2]
@@ -258,13 +297,36 @@ class Correlator:
 
                     bls_ind += 1
         
+       
         # Get memory info for each parallel process
-        process = psutil.Process(os.getpid())
+        #process = psutil.Process(os.getpid())
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
         print(mem_used_mb)
+
+        # Delete the chunk array from the memory and free up memory through garbage collection invoked manually
+        #del chunk
+        #gc.collect()
+
+        # Now check the CPU pinning: check if different processes are attached to differnt cpus
+        #print(f"Process PID {os.getpid()} and CPU:{os.sched_getaffinity(os.getpid())}")
+        
         t2 = tm.time()
-        print(f"correlation time:{(t2-t1):0.3f}")
+        print(f"correlation time of process, {pid}:{(t2-t1):0.3f}")
         return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk, samp_ratio)
+    
+    def profiled_worker(self, inp):
+        """
+        We will wrap the visibility calculation function in here to get the profile of each 
+        process
+        """
+        profiler = cProfile.Profile()
+        result = profiler.runcall(self.calc_vis_uvw_ant, inp)
+        
+        profile_file = f"prof/profile_worker_pid{os.getpid()}.prof"
+        profiler.dump_stats(profile_file)
+        
+        return result
+    
     
     @staticmethod
     def parse_header(header):
@@ -434,7 +496,7 @@ class Correlator:
 def main(args):
     
     fob = Correlator(args.DADAfile, args.METAfile)
-    print(fob.header)
+    #print(fob.header)
     
     fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms)
     
