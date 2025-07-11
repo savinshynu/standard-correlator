@@ -121,7 +121,7 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
-                num_workers = 1
+                num_workers = 16
                  # No. of CPUs to use at a time
 
 
@@ -223,6 +223,9 @@ class Correlator:
         #os.sched_setaffinity(pid, {inp_args[0]})
         #print(f"Process: {pid} pinned to Core: {inp_args[0]}")
 
+        mem_used_mb = process.memory_info().rss / (1024 * 1024)
+        print(mem_used_mb)
+
         t0 = tm.time()
 
         _, uvw_now, ant_names, filepath, count, offset, par = inp_args
@@ -247,6 +250,9 @@ class Correlator:
         # converting that to a complex format
         chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
 
+        mem_used_mb = process.memory_info().rss / (1024 * 1024)
+        print(mem_used_mb)
+        
         t1 = tm.time()
         #print(f"data collection and transpose: {(t1-t0):0.3f}")
 
