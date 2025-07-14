@@ -67,7 +67,6 @@ class Correlator:
                 nchan = self.header['NCHAN']
                 npol = self.header['NPOL']
                 ndim = self.header['NDIM']
-                npol_prod = 2 #just consider RR and LL for now,  # output polarization products [RR*, RL*, LR*, LL*]
                 inner_t = self.header['INNER_T']
                 outer_t = int(int_dur/(self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)) # Number of outer time steps to read at a time
 
@@ -111,8 +110,12 @@ class Correlator:
                 self.meta['tInt'] = int_dur
                 self.meta['data_par'] = (dp, outer_t, nant, nchan, inner_t, npol, ndim) # adding the basic data dimension parameters
                 
+                # Number of polarization products
+                # XX, YY, XY and YX
+                nprod = 4
+
                 # Defining array to store the visibilities, flag and sample ration per integration
-                vis_mat = np.zeros((nint, nbls, nchan, npol), dtype='complex64')
+                vis_mat = np.zeros((nint, nbls, nchan, nprod), dtype='complex64')
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
@@ -149,8 +152,8 @@ class Correlator:
                 print(f"Total time: {(tf1-tf0):0.3f}")
 
                 #reshaping all the array into nint*nbls format suitable for UVH5 datasets
-                self.data = (vis_mat.reshape(nint*nbls, nchan, npol), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
-                            ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, npol), nsamples_mat.reshape(nint*nbls, nchan, npol))
+                self.data = (vis_mat.reshape(nint*nbls, nchan, nprod), uvw_array.reshape(nint*nbls,3), ant1_array.reshape(nint*nbls),
+                            ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, nprod), nsamples_mat.reshape(nint*nbls, nchan, nprod))
 
         
         else:
@@ -162,7 +165,6 @@ class Correlator:
         the corresponding the uvw cooordinates
         """
         dp, outer_t, nant, nchan, inner_t, npol, ndim = self.meta['data_par']
-        #output = []
         count =  dp * outer_t
 
         for num in range(self.meta['nTimesteps']):
@@ -213,7 +215,7 @@ class Correlator:
         #print(f"data collection and transpose: {(t1-t0):0.3f}")
 
         #nant, nchan, ntimes, _ = chunk.shape
-        nprod = 2 # 2 polarization product for now
+        nprod = 4 # 2 polarization product for now
         nbls = int(nant*(nant+1)/2)
         vis_chunk = np.zeros((nbls, nchan, nprod), dtype='complex64')
         ant1_chunk = np.zeros((nbls), dtype = 'int32') # array for storing the baseline information 
@@ -227,7 +229,8 @@ class Correlator:
                  
             vis_chunk[bls_ind, :, 0] = (chunk[ant, :, :, 0] * np.conjugate(chunk[ant, :, :, 0])).mean(axis=1) # XX
             vis_chunk[bls_ind, :, 1] = (chunk[ant, :, :, 1] * np.conjugate(chunk[ant, :, :, 1])).mean(axis=1) # YY
-
+            vis_chunk[bls_ind, :, 2] = (chunk[ant, :, :, 0] * np.conjugate(chunk[ant, :, :, 1])).mean(axis=1) # XY
+            vis_chunk[bls_ind, :, 3] = (chunk[ant, :, :, 1] * np.conjugate(chunk[ant, :, :, 0])).mean(axis=1) # YX 
             
             ant1_chunk[bls_ind] = ant_names[ant] # First antenna
             ant2_chunk[bls_ind] = ant_names[ant] # second antenna
@@ -242,6 +245,8 @@ class Correlator:
 
                     vis_chunk[bls_ind, :, 0] = (chunk[ant1, :, :, 0] * np.conjugate(chunk[ant2, :, :, 0])).mean(axis=1) # XX
                     vis_chunk[bls_ind, :, 1] = (chunk[ant1, :, :, 1] * np.conjugate(chunk[ant2, :, :, 1])).mean(axis=1) # YY  
+                    vis_chunk[bls_ind, :, 2] = (chunk[ant1, :, :, 0] * np.conjugate(chunk[ant2, :, :, 1])).mean(axis=1) # XY
+                    vis_chunk[bls_ind, :, 3] = (chunk[ant1, :, :, 1] * np.conjugate(chunk[ant2, :, :, 0])).mean(axis=1) # YX
 
                     ant1_chunk[bls_ind] = ant_names[ant1]
                     ant2_chunk[bls_ind] = ant_names[ant2]
@@ -338,7 +343,7 @@ class Correlator:
         nbltimes = nbls*ntimes # baseline * ntimes
         nfreqs = self.header['NCHAN'] # No. of frequency channels
         nspws = 1 # spectral windows
-        npols = 2 # polarization products, ideally 4, setting 2 now for RR and LL
+        nprod = 4 # polarization products, XX, YY, XY and YX
 
         ## collecting important data
         vis_data, uvw_array, ant1_array, ant2_array, flag_data, nsamples_data = self.data 
@@ -358,7 +363,7 @@ class Correlator:
         spw_array = np.ones((1), dtype = 'int32') #only one spectral index
         flex_spw = False # set to true if more than 1 spectral windows
         #pol_array = np.array([-1, -3, -4, -2], dtype='int32') # RR, RL, LR, LL [-1, -3, -4, -2]
-        pol_array = np.array([-5, -6]) # XX, YY, XY, YX [-5, -6, -7, -8], currently only have XX and YY
+        pol_array = np.array([-5, -6, -7, -8]) # XX, YY, XY, YX [-5, -6, -7, -8], currently only have XX and YY
         version = '1.0'.encode()
         object = self.header["SOURCE"].encode()
         phase_type = 'phased'.encode() # assuming the input data is phased
@@ -372,7 +377,7 @@ class Correlator:
         #flag_data = np.zeros(visdata.shape, dtype = 'bool')
         #nsamples = np.ones(visdata.shape, dtype = 'float32')
         
-        head_dict = {'Nants_data': nants_data  , 'Nants_telescope': nants_data, 'Nbls': nbls, 'Nblts': nbltimes, 'Nfreqs':nfreqs, 'Npols':npols, 'Nspws':nspws, 'Ntimes':ntimes,
+        head_dict = {'Nants_data': nants_data  , 'Nants_telescope': nants_data, 'Nbls': nbls, 'Nblts': nbltimes, 'Nfreqs':nfreqs, 'Npols':nprod, 'Nspws':nspws, 'Ntimes':ntimes,
          'altitude': alt_mkat, 'ant_1_array': ant1_array, 'ant_2_array': ant2_array, 'antenna_diameters': antenna_diameter, 'antenna_names': ant_names, 'antenna_numbers': ant_numbers, 
          'antenna_positions': antenna_positions, 'channel_width': chan_width, 'extra_keywords': extra_keywords, 'flex_spw': flex_spw, 'freq_array': freq_array,
          'history': history , 'instrument': instrument, 'integration_time': integration_time, 'latitude': lat_mkat, 'longitude': lon_mkat, 'object_name': object, 'phase_center_dec': phase_center_dec, 
