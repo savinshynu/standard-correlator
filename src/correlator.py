@@ -137,7 +137,7 @@ class Correlator:
 
                 with mp.Pool(processes=num_workers) as pool:
                     # Feed offsets and file handler into pool
-                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets)):
+                    for num, output in enumerate(pool.imap(self.calc_vis_uvw_ant, self.read_data_offsets())):
 
                         # calculate averaged visibilities 
                         vis_int, uvw_int, ant1_int, ant2_int, samp_ratio = output
@@ -169,13 +169,9 @@ class Correlator:
 
         for num in range(self.meta['nTimesteps']):
 
-            ind = num % ncpus # allocate ncpus among number of time steps that are needed to parallelize
-            cpu_id = cpu_ids[ind] # Basically pinning a single cpu_id to each process here.
-
             offset = num*count + self.header['HDR_SIZE']
             # get the UVW value at this time for all the antennas
             uvw_now = meerkat_uvw(self.meta['time_array'][num], self.meta['pointing'], self.meta['antenna_positions'])
-            #print(self.fh.tell())
             
             yield (uvw_now, self.meta['ant_index'], self.file_path, count, offset, self.meta['data_par'])
 
@@ -185,7 +181,9 @@ class Correlator:
         Calculate the visibility for each chunk read into the memory, UVW coordinates
         and collect baseline information.
         """
-        
+        # Process ID
+        pid = os.getpid()
+
         t0 = tm.time()
 
         uvw_now, ant_names, filepath, count, offset, par = inp_args
