@@ -22,9 +22,10 @@ from uvh5_tools import create_uvh5
 
 
 class Correlator:
-    def __init__(self, file_path, meta_file_path):
+    def __init__(self, file_path, meta_file_path, ncpus):
         self.file_path = file_path
         self.meta_file = meta_file_path
+        self.ncpus = int(ncpus)
         self.header = None
         self.data = None
         self.meta = {} # extracted information from the meta file
@@ -119,7 +120,7 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
 
-                num_workers = 16
+                num_workers = self.ncpus
                  # No. of CPUs to use at a time
 
 
@@ -401,12 +402,13 @@ class Correlator:
         
         return (ant_pos_ecef - np.array(ref_ecef)) # Antenna positions in XYZ wrt to reference antenna or center of the array
 
-    def write_uvh5(self, outpath, msdata):
+    def write_uvh5(self, outpath, msdata, rem_uvh5):
         """
         Write the header and data into a uvh5 file
         """
         
-        filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+"_multi.uvh5")
+        #filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+"_multi.uvh5")
+        filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".uvh5")
         print(f"Writing out {filepath_uvh5}")
         fob = h5py.File(filepath_uvh5, "w") # creating the uvh5 file
         head_dict, data_dict = self.get_header_data() # collecting all the important data and header
@@ -422,13 +424,17 @@ class Correlator:
                 uvd.write_ms(outfile_ms)
             else:
                 print(f"{outfile_ms} already exists")
+            
+            if rem_uvh5 and os.path.exists(filepath_uvh5): # Remove the UVH5 file after creation of the MS file
+                print(f"Removing {filepath_uvh5}")
+                os.remove(filepath_uvh5)
 
 def main(args):
     
-    fob = Correlator(args.DADAfile, args.METAfile)
+    fob = Correlator(args.DADAfile, args.METAfile, args.Ncpus)
     #print(fob.header)
     
-    fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms)
+    fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms, rem_uvh5=args.rem_uvh5)
     
     
 
@@ -440,8 +446,10 @@ if __name__ == '__main__':
 
     parser.add_argument('DADAfile', type=str, help="Input voltage data file in the .dada format")
     parser.add_argument('METAfile', type=str, help="Input metafile for the observations in the .hdf5 format")
+    parser.add_argument('Ncpus', type=str, help="No. of CPUs per task used for multiprocessing")
     parser.add_argument('-o', '--outdir', type=str, required=False, default='.', help='Filepath of the output directory for storing visibilities')
     parser.add_argument('-ms', '--casa_ms', action='store_true', help="Outputs the visibilities in the CASA MS format in addition to UVH5 format")
+    parser.add_argument('-r', '--rem_uvh5', action='store_true', help="Remove the UVH5 file after the conversion to CASA MS format")
 
     args = parser.parse_args()
     
