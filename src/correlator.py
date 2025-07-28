@@ -349,7 +349,7 @@ class Correlator:
         ant_pos_ecef = np.array(list(self.meta['antenna_positions'].values())) # Actual X, Y, Z antenna positions in ECEF (m)
         return (ant_pos_ecef - np.array(ref_ecef)) # Antenna positions in XYZ wrt to reference antenna or center of the array
 
-    def write_uvh5(self, outpath, msdata):
+    def write_uvh5(self, outpath, msdata, rem_uvh5):
         """
         Write the header and data into a uvh5 file
         """
@@ -366,14 +366,22 @@ class Correlator:
             uvd = UVData()
             uvd.read(filepath_uvh5, fix_old_proj=False)
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".ms")
-            uvd.write_ms(outfile_ms)
+            if not os.path.exists(outfile_ms):
+                uvd.write_ms(outfile_ms)
+            else:
+                print(f"{outfile_ms} already exists")
+            
+            if rem_uvh5 and os.path.exists(filepath_uvh5): # Remove the UVH5 file after creation of the MS file
+                print(f"Removing {filepath_uvh5}")
+                os.remove(filepath_uvh5)
+
 
 def main(args):
     
     fob = Correlator(args.DADAfile, args.METAfile)
     print(fob.header)
     
-    fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms)
+    fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms, rem_uvh5=args.rem_uvh5)
     
     
 
@@ -387,6 +395,7 @@ if __name__ == '__main__':
     parser.add_argument('METAfile', type=str, help="Input metafile for the observations in the .hdf5 format")
     parser.add_argument('-o', '--outdir', type=str, required=False, default='.', help='Filepath of the output directory for storing visibilities')
     parser.add_argument('-ms', '--casa_ms', action='store_true', help="Outputs the visibilities in the CASA MS format in addition to UVH5 format")
+    parser.add_argument('-r', '--rem_uvh5', action='store_true', help="Remove the UVH5 file after the conversion to CASA MS format")
 
     args = parser.parse_args()
     
