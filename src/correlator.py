@@ -211,7 +211,7 @@ class Correlator:
 
         
         t1 = tm.time()
-        #print(f"data collection and transpose: {(t1-t0):0.3f}")
+        print(f"data collection and transpose, {pid}: {(t1-t0):0.3f}")
 
         #nant, nchan, ntimes, _ = chunk.shape
         nprod = 4 # 2 polarization product for now
@@ -256,6 +256,10 @@ class Correlator:
         
         t2 = tm.time()
         print(f"correlation time of process, {pid}:{(t2-t1):0.3f}")
+
+        # delete the data chunk. Don't need it anymore
+        # del chunk
+
         return (vis_chunk, uvw_chunk, ant1_chunk, ant2_chunk, samp_ratio)
        
     
