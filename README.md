@@ -15,5 +15,37 @@ Dependencies required:
 - numpy
 - tqdm
 
-Usage: ```python correlator.py [DADA file] [meta file] -o [output filepath] -ms (CASA MS if needed)```
-Make sure to input the right input file by matching the date on the meta file and DADA file.
+
+## Usage
+
+```sh
+python correlator.py DADAfile METAfile [options]
+```
+
+**Positional arguments:**
+
+- `DADAfile`: Input voltage data file in the `.dada` format  
+- `METAfile`: Input metafile for the observations in `.hdf5` format
+
+**Optional arguments:**
+
+- `-o`, `--outdir`: Output directory for visibilities (default: current directory)
+- `-ms`, `--casa_ms`: Output visibilities in CASA MS format (in addition to UVH5)
+- `-r`, `--rem_uvh5`: Remove the UVH5 file after the conversion to CASA MS format
+- `-b`, `--backend`: **Select backend for correlation:**
+    - `cpu`: Use CPU with Numba acceleration
+    - `gpu`: Use GPU with JAX (requires compatible GPU and JAX installation)  
+    - *(default: `cpu`)*
+
+
+## Example Commands
+
+**Run on CPU using all cores, save output to `./results` as UVH5:**
+```sh
+python correlator.py test.dada test_meta.h5 -o ./results
+```
+
+**Run on GPU, save both UVH5 and CASA MS output, remove UVH5 after conversion:**
+```sh
+python correlator.py test.dada test_meta.h5 -o ./results -ms -r -b gpu
+```
