@@ -64,9 +64,15 @@ class Correlator:
                 ndim = self.header['NDIM']
                 npol_prod = 2 #just consider RR and LL for now,  # output polarization products [RR*, RL*, LR*, LL*]
                 inner_t = self.header['INNER_T']
-                outer_t = int(int_dur/(self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)) # Number of outer time steps to read at a time
 
-                nint = int(raw_size/(dp*outer_t)) # number of integrated time samples
+                # Check if the tint results in correct way of chunking else round it
+                dp_time = self.header['INNER_T']*float(self.header['TSAMP'])*1e-6 # Time of 256 time sample chunk
+                
+                outer_t = int(int_dur // dp_time) # Number of outer time steps to read at a time
+
+                print(f"Reading chunks with {outer_t*dp_time:0.3f} s integration")
+
+                nint = int(np.ceil(raw_size/(dp*outer_t))) # number of integrated time samples
                 
                 # temporary setting for now 
                 #nint = 2    
@@ -80,7 +86,8 @@ class Correlator:
                     sys.exit("Check the data offset value. Not a multiple of the basic read structure")
 
                 time_offset *= (self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)  # in seconds. Is there a better way to do this?
-
+                print(time_offset)
+                
                 ant_names_str = list(self.meta['antenna_positions'].keys()) # antenna names in the string format
                 
                 ant_names  = [int(ant[1:]) for ant in ant_names_str]   # antenna numbers without "m" in front
