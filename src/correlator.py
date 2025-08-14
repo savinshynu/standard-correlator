@@ -131,20 +131,26 @@ class Correlator:
                     uvw_now = meerkat_uvw(time_array[num], pointing, antpos)
                      
                     if chunk.size < dp*outer_t:
+                        outer_t_sm = int(chunk.size/dp)
+                        chunk = np.reshape(chunk, (outer_t_sm, nant, nchan, 
+                            inner_t, npol, ndim)) 
+                        # transposing to array the combine the outer and inner time axis
+                        chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan,
+                         outer_t_sm*inner_t, npol, ndim))
+
                         samp_ratio = round(chunk.size/(dp*outer_t), 3)
                         nsamples_mat[num,:, :, :] = samp_ratio
-                    
-                    #first reading based on how data is stored
-                    chunk = np.reshape(chunk, (outer_t, nant, nchan, 
+                    else:
+                        #first reading based on how data is stored
+                        chunk = np.reshape(chunk, (outer_t, nant, nchan, 
                             inner_t, npol, ndim)) 
-            
-                    # transposing to array the combine the outer and inner time axis
-                    chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan, outer_t*inner_t, npol, ndim))
+                        # transposing to array the combine the outer and inner time axis
+                        chunk = np.transpose(chunk, axes=(1,2,0,3,4,5)).reshape((nant, nchan,
+                         outer_t*inner_t, npol, ndim))
 
                     # converting that to a complex format
                     chunk = np.asarray(chunk, dtype='float32').view('complex64').squeeze()
-                    #print(chunk.shape)
-                    #t1 = tm.time()
+                    
                     # calculate averaged visibilities 
                     vis_int, uvw_int, ant1_int, ant2_int = self.calc_vis_uvw_ant(chunk, uvw_now, ant_names)
                     
