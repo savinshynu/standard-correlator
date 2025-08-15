@@ -377,11 +377,13 @@ class Correlator:
         fob = h5py.File(filepath_uvh5, "w") # creating the uvh5 file
         head_dict, data_dict = self.get_header_data() # collecting all the important data and header
         create_uvh5(fob, head_dict, data_dict) # Writing all the data into the uvh5 file handle
-        
+        fob.close() # close afer after writing
+
+        # delete the header and data once it is written
+        del head_dict, data_dict
+
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
         print(f"Writing uvh5: {mem_used_mb}")
-    
-        fob.close() # close afer after writing
 
         if msdata: # if needed to convert the UVH5 data into the CASA MS format
             print("Writing out the CASA MS format file")
