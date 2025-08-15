@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import h5py
+import psutil
 import time as tm
 import numpy as np
 from katpoint import Antenna # Meerkat library for reading metafile
@@ -366,21 +367,35 @@ class Correlator:
         """
         Write the header and data into a uvh5 file
         """
-        
+        # process id
+        pid = os.getpid()
+        process = psutil.Process(pid)
+
         filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".uvh5")
         print(f"Writing out {filepath_uvh5}")
         fob = h5py.File(filepath_uvh5, "w") # creating the uvh5 file
         head_dict, data_dict = self.get_header_data() # collecting all the important data and header
         create_uvh5(fob, head_dict, data_dict) # Writing all the data into the uvh5 file handle
+        
+        mem_used_mb = process.memory_info().rss / (1024 * 1024)
+        print(f"Writing uvh5: {mem_used_mb}")
+    
         fob.close() # close afer after writing
 
         if msdata: # if needed to convert the UVH5 data into the CASA MS format
             print("Writing out the CASA MS format file")
             uvd = UVData()
             uvd.read(filepath_uvh5, fix_old_proj=False)
+            
+            mem_used_mb = process.memory_info().rss / (1024 * 1024)
+            print(f"reading uvh5: {mem_used_mb}")
+
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".ms")
             if not os.path.exists(outfile_ms):
                 uvd.write_ms(outfile_ms)
+                
+                mem_used_mb = process.memory_info().rss / (1024 * 1024)
+                print(f"writing ms: {mem_used_mb}")
             else:
                 print(f"{outfile_ms} already exists")
             
