@@ -71,7 +71,9 @@ class Correlator:
                 
                 outer_t = int(int_dur // dp_time) # Number of outer time steps to read at a time
 
-                print(f"Reading chunks with {outer_t*dp_time:0.3f} s integration")
+                #update the integration duration here
+                int_dur = outer_t*dp_time
+                print(f"Reading chunks with {int_dur:0.3f} s integration")
 
                 nint = int(np.ceil(raw_size/(dp*outer_t))) # number of integrated time samples
                 
@@ -82,12 +84,11 @@ class Correlator:
                 # This data_offset usually include only the data corresponding to the actual voltages and not the metadata
                 data_offset = int(self.header['OBS_OFFSET']) # how much bytes of data is offset from the very initial observation, from t=0
                 
-                time_offset = int(data_offset/dp) # Ideally this should be an integer, if not, there could be a problem
+                time_offset = int(data_offset/dp)*dp_time 
                 if data_offset % dp != 0:
                     sys.exit("Check the data offset value. Not a multiple of the basic read structure")
 
-                time_offset *= (self.header['INNER_T']*float(self.header['TSAMP'])*1e-6)  # in seconds. Is there a better way to do this?
-                print(time_offset)
+                print(f"Time offset : {time_offset}")
                 
                 ant_names_str = list(self.meta['antenna_positions'].keys()) # antenna names in the string format
                 
