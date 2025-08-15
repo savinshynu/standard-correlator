@@ -123,6 +123,10 @@ class Correlator:
                 flag_mat = np.zeros(vis_mat.shape, dtype = 'bool') # flag information in the data
                 nsamples_mat = np.ones(vis_mat.shape, dtype = 'float32') # fraction of samples going into each integration
                 
+                # process id
+                pid = os.getpid()
+                process = psutil.Process(pid)
+
                 print("Reading chunks of data from the DADA files and cross correlating to get the visibility matrix")
                 tf0 = tm.time()
                 for num in tqdm(range(nint)):
@@ -170,6 +174,15 @@ class Correlator:
                             ant2_array.reshape(nint*nbls), flag_mat.reshape(nint*nbls, nchan, nprod), nsamples_mat.reshape(nint*nbls, nchan, nprod))
                 tf1 = tm.time()
                 print(f"Total time:{(tf1-tf0):0.3f}")
+
+                mem_used_mb = process.memory_info().rss / (1024 * 1024)
+                print(f"Before chunk: {mem_used_mb}")
+
+                # delete the chunk after correlation
+                del chunk
+
+                mem_used_mb = process.memory_info().rss / (1024 * 1024)
+                print(f"After chunk: {mem_used_mb}")
         
         else:
             sys.exit("Unknown data order for Meerkat")
