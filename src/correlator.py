@@ -176,13 +176,13 @@ class Correlator:
                 print(f"Total time:{(tf1-tf0):0.3f}")
 
                 mem_used_mb = process.memory_info().rss / (1024 * 1024)
-                print(f"Before chunk: {mem_used_mb}")
+                print(f"Before chunk deletion: {mem_used_mb}")
 
                 # delete the chunk after correlation
                 del chunk
 
                 mem_used_mb = process.memory_info().rss / (1024 * 1024)
-                print(f"After chunk: {mem_used_mb}")
+                print(f"After correlation, storing products and deleting last chunk: {mem_used_mb}")
         
         else:
             sys.exit("Unknown data order for Meerkat")
@@ -392,11 +392,13 @@ class Correlator:
         create_uvh5(fob, head_dict, data_dict) # Writing all the data into the uvh5 file handle
         fob.close() # close afer after writing
 
-        # delete the header and data once it is written
-        del head_dict, data_dict
+        # delete the header and data to save the memory
+        self.head = None
+        self.header = None
+        self.meta = None
 
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
-        print(f"Writing uvh5: {mem_used_mb}")
+        print(f"Mem after deleting data and header: {mem_used_mb}")
 
         if msdata: # if needed to convert the UVH5 data into the CASA MS format
             print("Writing out the CASA MS format file")
@@ -404,14 +406,17 @@ class Correlator:
             uvd.read(filepath_uvh5, fix_old_proj=False)
             
             mem_used_mb = process.memory_info().rss / (1024 * 1024)
-            print(f"reading uvh5: {mem_used_mb}")
+            print(f"Mem after reading uvh5 file for conversion: {mem_used_mb}")
 
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0]+".ms")
             if not os.path.exists(outfile_ms):
                 uvd.write_ms(outfile_ms)
-                
+
+                # Delete this instance as well after writing out ms
+                del uvd
+
                 mem_used_mb = process.memory_info().rss / (1024 * 1024)
-                print(f"writing ms: {mem_used_mb}")
+                print(f"Mem afte writing ms and deleting pyuvdata instance: {mem_used_mb}")
             else:
                 print(f"{outfile_ms} already exists")
             
