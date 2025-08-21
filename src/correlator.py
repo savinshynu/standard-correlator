@@ -393,7 +393,7 @@ class Correlator:
         fob.close() # close afer after writing
 
         # delete the header and data to save the memory
-        del self.head, self.header, self.meta
+        del self.data, self.header, self.meta
         del head_dict, data_dict
 
         mem_used_mb = process.memory_info().rss / (1024 * 1024)
