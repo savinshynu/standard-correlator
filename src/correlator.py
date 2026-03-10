@@ -1,6 +1,27 @@
 import os
 import sys
 import argparse
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# define logging formatter
+formatter = logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s')
+
+# define logging filehandler
+filehandler = logging.FileHandler('correlator.log')
+filehandler.setFormatter(formatter)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+
+# set up logger
+logger.addHandler(filehandler)
+logger.addHandler(console_handler)
+
 
 # === EARLY ARGUMENT PARSING FOR THREADS ===
 thread_parser = argparse.ArgumentParser(add_help=False)
@@ -19,7 +40,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 # === ONLY NOW IMPORT NUMBA AND NUMBA-RELEVANT LIBRARIES ===
 import numba as nb
 nb.set_num_threads(thread_args.nthreads)
-# print(f"Numba will use {nb.get_num_threads()} threads.")
+logger.debug(f"Numba will use {nb.get_num_threads()} threads.")
 
 # === IMPORT THE REST OF YOUR LIBRARIES ===
 import h5py
@@ -71,6 +92,7 @@ class Correlator:
         raw_size = filesize - int(self.header['HDR_SIZE'])
         if self.header['ORDER'] != 'TAFTP':
             sys.exit("Unknown data order for Meerkat")
+            logger.critical('Unknown data order for Meerkat')
 
         with open(self.file_path, "rb") as f:
             f.seek(self.header['HDR_SIZE'])
@@ -82,18 +104,25 @@ class Correlator:
             inner_t = self.header['INNER_T']
 
             dp = nant * nchan * inner_t * npol * ndim  # bytes per INNER_T block
+            logger.debug(f'Size of each internal time block: {dp} bytes')
+            
             check = raw_size % dp
             if check:
                 sys.exit("Check the order of data")
+                logger.critical('Order of the data is different than expected')
 
             outer_t = int(int_dur / (inner_t * float(self.header['TSAMP']) * 1e-6))
+            logger.debug(f"{outer_t} outer time samples within the integration window of {int_dur} s")
+            
             nint = raw_size // (dp * outer_t)  # number of integrated time samples
+            logger.debug(f"Planned number of integrations: {nint}")
 
             nbls = nant * (nant + 1) // 2  # correlations and autocorrelations
             nprod = 4  # XX YY XY YX
 
             ant1_idx, ant2_idx = self.build_baseline_map(nant)
-
+            
+            logger.debug("Initializing arrays for holding the voltage chunk and correlated visibilities")
             vis_buf = np.empty((nbls, nchan, nprod), np.complex64)
             uvw_buf = np.empty((nbls, 3), np.float32)
             ant1_buf = np.empty(nbls, np.int32)
@@ -127,9 +156,11 @@ class Correlator:
                 "tInt": int_dur
             })
 
-            # print(f"Reading DADA and correlating ({self.backend.upper()})…")
+            logger.info(f"Reading DADA and correlating ({self.backend.upper()} backend)…")
+            logger.info(f"Processing {nint} data chunks")
+
             tf0 = tm.time()
-            for num in tqdm(range(nint), disable=True):
+            for num in tqdm(range(nint), disable=False):
                 t0 = tm.time()
 
                 chunk = np.fromfile(f, dtype=np.int8, count=dp * outer_t)
@@ -148,6 +179,8 @@ class Correlator:
                 # Call correct correlator based on backend
                 if self.backend == "gpu":
                     # Move arrays to JAX device
+                    logger.debug(f"Moving chunk:{num} to GPU")
+
                     chunk_jax = jnp.asarray(chunk)
                     uvw_now_jax = jnp.asarray(uvw_now)
                     ant1_idx_jax = jnp.asarray(ant1_idx)
@@ -172,9 +205,9 @@ class Correlator:
                 ant1_array[num] = ant1_buf
                 ant2_array[num] = ant2_buf
 
-                # print(f"Loading + correlation: {tm.time() - t0:0.3f}s")
+                logger.debug(f"Chunk: {num}: Loading + correlation: {tm.time() - t0:0.3f}s")
 
-            # print(f"Total elapsed inside loop: {tm.time() - tf0:0.3f}s")
+            logger.debug(f"Total elapsed inside loop: {tm.time() - tf0:0.3f}s")
 
         ant_numbers_lookup = np.asarray(self.meta["ant_index"], dtype=np.int32)
         ant1_array = ant_numbers_lookup[ant1_array]
@@ -192,6 +225,9 @@ class Correlator:
 
     @staticmethod
     def build_baseline_map(nant: int):
+        """
+        Create a baseline index map given the antenna numbers.
+        """
         ant1 = []
         ant2 = []
         for a in range(nant):
@@ -206,6 +242,11 @@ class Correlator:
     @staticmethod
     @jax.jit
     def calc_vis_uvw_ant_gpu(chunk, uvw_now, ant1_idx, ant2_idx):
+        """
+        Correlation computation in GPUs
+
+        Returns: Visibiilities
+        """
         nbls = ant1_idx.shape[0]
         nchan = chunk.shape[1]
         nt = chunk.shape[2]
@@ -239,6 +280,10 @@ class Correlator:
                              ant1_idx, ant2_idx,  # baseline map
                              vis_out, uvw_out,  # outputs (pre‑allocated)
                              ant1_out, ant2_out):
+        """
+        Correlation computation in CPUs
+        Returns visibilities 
+        """
         nbls, nchan = vis_out.shape[0], vis_out.shape[1]
         nt = chunk.shape[2]
 
@@ -277,6 +322,9 @@ class Correlator:
 
     @staticmethod
     def parse_header(header):
+        """
+        Parsing the data header information into a dictionary.
+        """
         header_dict = {}
         for line in header.split('\n'):
             if line and not line.startswith('#') and ' ' in line:
@@ -337,6 +385,10 @@ class Correlator:
             self.meta.update(dict(hf.attrs))
 
     def get_header_data(self):
+        """
+        Collect all the data and metadata for the 
+        UVH5 file
+        """
         lat_mkat = -30.711055553291935  # latitude degrees # obtained from Meerkat visibilities
         lon_mkat = 21.443888889697842  # longitude degrees
         alt_mkat = 1086.599484886974  # altitude in meters
@@ -408,9 +460,11 @@ class Correlator:
 
         if ref_ant:
             ref_ecef = ant_pos[ref_ant]
+            logger.debug('Using the input reference antenna location for UVW calculation')
         else:
             # Use the the coordinates of the center of the array
             ref_ecef = (5109360.133, 2006852.586, -3238948.127)
+            logger.debug('Using the array center location for UVW calculation')
 
         ant_pos_ecef = np.array(
             list(self.meta['antenna_positions'].values()))  # Actual X, Y, Z antenna positions in ECEF (m)
@@ -422,26 +476,28 @@ class Correlator:
         Write the header and data into a uvh5 file
         """
         os.makedirs(outpath, exist_ok=True)
+        logger.debug(f"Created directory {outpath} if not exist already")
+        
         filepath_uvh5 = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0] + ".uvh5")
-        # print(f"Writing out {filepath_uvh5}")
+        logger.info(f"Writing out {filepath_uvh5}")
         fob = h5py.File(filepath_uvh5, "w")  # creating the uvh5 file
         head_dict, data_dict = self.get_header_data()  # collecting all the important data and header
         create_uvh5(fob, head_dict, data_dict)  # Writing all the data into the uvh5 file handle
         fob.close()  # close afer after writing
 
         if msdata:  # if needed to convert the UVH5 data into the CASA MS format
-            # print("Writing out the CASA MS format file")
+            logger.info("Writing out the CASA MS format file")
             uvd = UVData()
             uvd.read(filepath_uvh5, fix_old_proj=False)
             outfile_ms = os.path.join(outpath, os.path.splitext(os.path.basename(self.file_path))[0] + ".ms")
             if not os.path.exists(outfile_ms):
                 uvd.write_ms(outfile_ms)
             else:
-                # print(f"{outfile_ms} already exists")
+                logger.debug(f"{outfile_ms} already exists")
                 pass
 
             if rem_uvh5 and os.path.exists(filepath_uvh5):  # Remove the UVH5 file after creation of the MS file
-                # print(f"Removing {filepath_uvh5}")
+                logger.debug(f"Removing {filepath_uvh5}")
                 os.remove(filepath_uvh5)
 
 
@@ -451,7 +507,7 @@ def main(args):
     # print(fob.header)
     fob.write_uvh5(outpath=args.outdir, msdata=args.casa_ms, rem_uvh5=args.rem_uvh5)
     t1 = tm.perf_counter()
-    # print(f"Total elapsed time: {t1 - t0:.3f} seconds")
+    logger.info(f"Total elapsed time: {t1 - t0:.3f} seconds")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
