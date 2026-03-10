@@ -1,4 +1,18 @@
 import h5py 
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# define logging formatter
+formatter = logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s')
+
+# define logging filehandler
+filehandler = logging.FileHandler('correlator.log')
+filehandler.setFormatter(formatter)
+
+# set up logger
+logger.addHandler(filehandler)
 
 def create_uvh5(fob, head_dict, data_dict):
     """
@@ -9,9 +23,13 @@ def create_uvh5(fob, head_dict, data_dict):
     head_dict : metadata dictionary
     data_dict: dictionary containing containing all the data
     """
+    logger.debug("Creating the UVH5 dataset")
 
     uvh5_header = fob.create_group("Header")
     uvh5_data = fob.create_group("Data")
+
+    logger.debug("Creating the Header and Data groups")
+    logger.debug("Adding header information")
 
     uvh5_header.create_dataset("longitude", data=head_dict['longitude'], dtype='d') # degrees
     uvh5_header.create_dataset("latitude", data=head_dict['latitude'], dtype='d') # degrees
@@ -66,9 +84,13 @@ def create_uvh5(fob, head_dict, data_dict):
     uvh5_header.create_dataset("uvw_array", data=head_dict['uvw_array'], dtype='d')
     uvh5_header.create_dataset("time_array", data=head_dict['time_array'], dtype='d')
     uvh5_header.create_dataset("integration_time", data=head_dict['integration_time'], dtype='d')
-
+    logger.debug("Finished adding header information")
+    
+    logger.debug("Started adding visibilities and flags to the Data group")
     uvh5_data.create_dataset("visdata", data=data_dict['visdata'], dtype='complex64')
     uvh5_data.create_dataset("flags", data=data_dict['flags'], dtype='?')
     uvh5_data.create_dataset("nsamples", data=data_dict['nsamples'], dtype='d')
+    logger.debug("Finished adding visibilities and flags to the Data group")
+
     
 
