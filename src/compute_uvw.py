@@ -2,7 +2,7 @@ import numpy as np
 from astropy import coordinates, time
 import astropy.units as u
 
-def meerkat_uvw(unix, direction, antpos):
+def meerkat_uvw(unix: float, direction: tuple[float], antpos: np.ndarray) -> np.ndarray:
     """
     Calculates and returns uvw in meters for a given time and pointing direction.
     direction is (ra,dec) as tuple in radians.
