@@ -65,15 +65,21 @@ os.environ["NUMBA_THREADING_LAYER"] = "omp"
 os.environ["OMP_PROC_BIND"] = "true"
 os.environ["OMP_PLACES"] = "cores"
 
+# Defining data annotation types
+# annotation type metadata
+tmeta = dict[str, int|str|float]
+#annotation type data
+tdata = tuple[np.ndarray]
+tvis = dict[str, np.ndarray]
 
 class Correlator:
-    def __init__(self, file_path, meta_file_path, backend='cpu'):
-        self.file_path = file_path
-        self.meta_file = meta_file_path
-        self.backend = backend  # "cpu" or "gpu"
-        self.header = None
-        self.data = None
-        self.meta = {}  # extracted information from the meta file
+    def __init__(self, file_path: str, meta_file_path: str, backend: str ='cpu') -> None:
+        self.file_path: str = file_path
+        self.meta_file: str = meta_file_path
+        self.backend: str = backend  # "cpu" or "gpu"
+        self.header: tmeta | None = None
+        self.data: tdata | None = None
+        self.meta: tmeta = {}  # extracted information from the meta file
         self.load_header()  # loading header from the DADA file
         self.extract_meta()  # loading metadata from the observation metadata
         self.load_all_data()  # load visibilities, UVW coordinates, flag, sample ratio, baseline info, etc.
@@ -84,12 +90,12 @@ class Correlator:
             header = f.read(4096).decode('ascii')
         self.header = self.parse_header(header)
 
-    def load_all_data(self, int_dur: float = 0.1):
+    def load_all_data(self, int_dur: float = 0.1) -> None:
         """
         Read the DADA file, average into integrations, correlate, and store results in `self.data`.
         """
-        filesize = os.path.getsize(self.file_path)
-        raw_size = filesize - int(self.header['HDR_SIZE'])
+        filesize: int = os.path.getsize(self.file_path)
+        raw_size: int = filesize - int(self.header['HDR_SIZE'])
         if self.header['ORDER'] != 'TAFTP':
             sys.exit("Unknown data order for Meerkat")
             logger.critical('Unknown data order for Meerkat')
@@ -97,11 +103,11 @@ class Correlator:
         with open(self.file_path, "rb") as f:
             f.seek(self.header['HDR_SIZE'])
 
-            nant = self.header['NANT']
-            nchan = self.header['NCHAN']
-            npol = self.header['NPOL']
-            ndim = self.header['NDIM']
-            inner_t = self.header['INNER_T']
+            nant: int = self.header['NANT']
+            nchan: int = self.header['NCHAN']
+            npol: int = self.header['NPOL']
+            ndim: int = self.header['NDIM']
+            inner_t: int = self.header['INNER_T']
 
             dp = nant * nchan * inner_t * npol * ndim  # bytes per INNER_T block
             logger.debug(f'Size of each internal time block: {dp} bytes')
@@ -120,7 +126,7 @@ class Correlator:
             nbls = nant * (nant + 1) // 2  # correlations and autocorrelations
             nprod = 4  # XX YY XY YX
 
-            ant1_idx, ant2_idx = self.build_baseline_map(nant)
+            ant1_idx: tdata, ant2_idx: tdata = self.build_baseline_map(nant)
             
             logger.debug("Initializing arrays for holding the voltage chunk and correlated visibilities")
             vis_buf = np.empty((nbls, nchan, nprod), np.complex64)
@@ -138,8 +144,8 @@ class Correlator:
             data_offset = int(self.header['OBS_OFFSET'])
             time_offset = (data_offset // dp) * (inner_t * float(self.header['TSAMP']) * 1e-6)
 
-            ant_names_str = list(self.meta['antenna_positions'].keys())
-            ant_names = [int(a[1:]) for a in ant_names_str]
+            ant_names_str: list[str] = list(self.meta['antenna_positions'].keys())
+            ant_names: list[int ]= [int(a[1:]) for a in ant_names_str]
 
             time_array = (float(self.header['UTC_START']) + time_offset +
                           int_dur / 2.0 + np.arange(nint) * int_dur)
@@ -174,7 +180,7 @@ class Correlator:
                     .reshape(nant, nchan, outer_t * inner_t, npol, ndim) \
                     .astype(np.float32).view('complex64').squeeze()
 
-                uvw_now = meerkat_uvw(time_array[num], pointing, antpos).astype(np.float32)
+                uvw_now: np.ndarray = meerkat_uvw(time_array[num], pointing, antpos).astype(np.float32)
 
                 # Call correct correlator based on backend
                 if self.backend == "gpu":
@@ -224,7 +230,7 @@ class Correlator:
         )
 
     @staticmethod
-    def build_baseline_map(nant: int):
+    def build_baseline_map(nant: int) -> tuple[np.ndarray]:
         """
         Create a baseline index map given the antenna numbers.
         """
@@ -241,7 +247,7 @@ class Correlator:
 
     @staticmethod
     @jax.jit
-    def calc_vis_uvw_ant_gpu(chunk, uvw_now, ant1_idx, ant2_idx):
+    def calc_vis_uvw_ant_gpu(chunk: np.ndarray, uvw_now: np.ndarray, ant1_idx: np.ndarray, ant2_idx: np.ndarray) -> tuple[np.ndarray]:
         """
         Correlation computation in GPUs
 
@@ -276,10 +282,10 @@ class Correlator:
 
     @staticmethod
     @njit(parallel=True, fastmath=True)
-    def calc_vis_uvw_ant_cpu(chunk, uvw_now,  # inputs
-                             ant1_idx, ant2_idx,  # baseline map
-                             vis_out, uvw_out,  # outputs (pre‑allocated)
-                             ant1_out, ant2_out):
+    def calc_vis_uvw_ant_cpu(chunk: np.ndarray, uvw_now: np.ndarray,  # inputs
+                             ant1_idx: np.ndarray, ant2_idx: np.ndarray,  # baseline map
+                             vis_out: np.ndarray, uvw_out: np.ndarray,  # outputs (pre‑allocated)
+                             ant1_out: np.ndarray, ant2_out: np.ndarray):
         """
         Correlation computation in CPUs
         Returns visibilities 
@@ -321,7 +327,7 @@ class Correlator:
             uvw_out[bl, 2] = uvw_now[a1, 2] - uvw_now[a2, 2]
 
     @staticmethod
-    def parse_header(header):
+    def parse_header(header: str) -> tmeta :
         """
         Parsing the data header information into a dictionary.
         """
@@ -344,7 +350,7 @@ class Correlator:
         return header_dict
 
     @staticmethod
-    def ant2bls(ant1, ant2):
+    def ant2bls(ant1: int, ant2: int) -> int:
 
         """
         Convert antenna index to baseline indec
@@ -355,7 +361,7 @@ class Correlator:
         return (a2 * (a2 - 1)) // 2 + a1
 
     @staticmethod
-    def convert_dir2float(ra, dec):
+    def convert_dir2float(ra: float, dec: float) -> tuple[float]:
         """
         Convert the ra and dec string into
         radians
@@ -384,7 +390,7 @@ class Correlator:
             self.meta["antenna_feng_map"] = antenna_feng_map
             self.meta.update(dict(hf.attrs))
 
-    def get_header_data(self):
+    def get_header_data(self) -> tuple[tmeta, tvis]:
         """
         Collect all the data and metadata for the 
         UVH5 file
@@ -451,7 +457,7 @@ class Correlator:
         # print(head_dict)
         return head_dict, data_dict
 
-    def get_antenna_positions_ref(self, ref_ant=None):
+    def get_antenna_positions_ref(self, ref_ant: int|None = None) -> np.ndarray:
         """
         Collect the antenna positions wrt to the reference antenna in the ECEF format
         If no reference antenna given, use the array center location
@@ -471,7 +477,7 @@ class Correlator:
         return (ant_pos_ecef - np.array(
             ref_ecef))  # Antenna positions in XYZ wrt to reference antenna or center of the array
 
-    def write_uvh5(self, outpath, msdata, rem_uvh5):
+    def write_uvh5(self, outpath: str, msdata: bool, rem_uvh5: bool):
         """
         Write the header and data into a uvh5 file
         """
