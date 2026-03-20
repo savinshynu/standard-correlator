@@ -1,5 +1,7 @@
-import h5py 
 import logging
+from typing import IO
+import h5py 
+import numpy as np
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -14,7 +16,12 @@ filehandler.setFormatter(formatter)
 # set up logger
 logger.addHandler(filehandler)
 
-def create_uvh5(fob, head_dict, data_dict):
+# type metadata
+tmeta = dict[str, int|str|float]
+#type data
+tvis = dict[str, np.ndarray]
+
+def create_uvh5(fob: IO[str], head_dict: tmeta, data_dict: tvis) -> None:
     """
     Create a UVH5 file containing correlated data
     Parameters:
