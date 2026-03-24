@@ -38,7 +38,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 # === ONLY NOW IMPORT NUMBA AND NUMBA-RELEVANT LIBRARIES ===
-import numba as nb
+import numba as nb 
 nb.set_num_threads(thread_args.nthreads)
 logger.debug(f"Numba will use {nb.get_num_threads()} threads.")
 
