@@ -14,6 +14,8 @@ Dependencies required:
 - katpoint
 - numpy
 - tqdm
+- jax
+- numba
 
 
 ## Usage
