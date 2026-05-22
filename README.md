@@ -14,7 +14,7 @@ Dependencies required:
 - katpoint
 - numpy
 - tqdm
-- jax
+- jax[CUDA]
 - numba
 
 
