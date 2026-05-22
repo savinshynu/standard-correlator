@@ -51,3 +51,17 @@ python correlator.py test.dada test_meta.h5 -o ./results
 ```sh
 python correlator.py test.dada test_meta.h5 -o ./results -ms -r -b gpu
 ```
+
+
+### Docker version:
+A container image for the correlator is available at ```harbor.zih.tu-dresden.de/dzastro/std-cor:v1.0.0```
+
+This has all the numba and CUDA dependencies if want to move away from setting up virtual environements.
+
+```
+docker pull docker://harbor.zih.tu-dresden.de/dzastro/std-cor:v1.0.0
+
+or 
+
+apptainer pull docker://harbor.zih.tu-dresden.de/dzastro/std-cor:v1.0.0
+```
